@@ -154,6 +154,7 @@ if __name__ == "__main__":
         final_df = pd.concat(all_races_data, ignore_index=True)
 
         print("\n--- Engineering historical performance features ---")
+        # Sort data chronologically for correct rolling calculations
         final_df.sort_values(by=['EventDate', 'RoundNumber', 'Driver'], inplace=True)
 
         # Calculate rolling averages for drivers
@@ -172,26 +173,23 @@ if __name__ == "__main__":
             lambda x: x.shift(1).rolling(window=WINDOW_SIZE, min_periods=1).mean()
         )
 
-        # Calculate track-specific average performance (all drivers at that track)
-        # We need to ensure EventDate is considered to only use *past* data for a given track
-        # To do this correctly, we'll group by GrandPrix and apply a rolling mean over time.
-        # This is more complex as it's not simply a 'shift(1)' on the whole df.
-        # For simplicity in this step, we'll calculate overall track average from all collected data.
-        # For true time-based track average, it would need to be done within the loop per race.
-        # Let's calculate overall track averages from the collected data for now.
-        track_avg_quali_map = final_df.groupby('GrandPrix')['QualiPosition'].mean().to_dict()
-        track_avg_race_map = final_df.groupby('GrandPrix')['RaceFinishPosition'].mean().to_dict()
-
-        final_df['TrackAvgQualiPosition'] = final_df['GrandPrix'].map(track_avg_quali_map)
-        final_df['TrackAvgRaceFinishPosition'] = final_df['GrandPrix'].map(track_avg_race_map)
+        # Calculate time-weighted track-specific average performance (crucial for accuracy!)
+        # This calculates the expanding mean of past performance at each specific Grand Prix.
+        final_df['TrackAvgQualiPosition'] = final_df.groupby('GrandPrix')['QualiPosition'].transform(
+            lambda x: x.shift(1).expanding(min_periods=1).mean()
+        )
+        final_df['TrackAvgRaceFinishPosition'] = final_df.groupby('GrandPrix')['RaceFinishPosition'].transform(
+            lambda x: x.shift(1).expanding(min_periods=1).mean()
+        )
 
 
         for col in ['DriverAvgQualiPositionLast3Races', 'DriverAvgRaceFinishPositionLast3Races',
                     'TeamAvgQualiPositionLast3Races', 'TeamAvgRaceFinishPositionLast3Races',
-                    'TrackAvgQualiPosition', 'TrackAvgRaceFinishPosition']: # Added new track features
+                    'TrackAvgQualiPosition', 'TrackAvgRaceFinishPosition']:
+            # Use .fillna() with a direct assignment to avoid FutureWarning
             if final_df[col].isnull().any():
                 fill_value = final_df[col].mean()
-                final_df[col].fillna(fill_value, inplace=True)
+                final_df[col] = final_df[col].fillna(fill_value) # Corrected fillna usage
                 print(f"Filled NaN in {col} with mean: {fill_value:.2f}")
 
 
@@ -203,4 +201,3 @@ if __name__ == "__main__":
         print(f"\nConsolidated data saved to {HISTORICAL_DATA_FILE}")
     else:
         print("\nNo data collected for the specified years. Please check for errors during data loading.")
-
