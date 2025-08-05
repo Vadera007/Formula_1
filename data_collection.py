@@ -3,12 +3,44 @@ import pandas as pd
 import os
 from datetime import datetime
 import pytz # Import pytz for timezone handling
+import numpy as np # Import numpy for numerical operations like np.nan
 
 # --- Configuration ---
 START_YEAR = 2023
 HISTORICAL_DATA_FILE = "f1_historical_data_with_features.csv"
 MAIN_CACHE_DIR = 'cache_main'
 WINDOW_SIZE = 3 # For lagged features (average over last N races)
+
+# --- Static Track Characteristics (Manually Curated - Add more as needed!) ---
+# These are approximate values. You can refine them or add more tracks.
+TRACK_CHARACTERISTICS = {
+    'Bahrain Grand Prix': {'LengthKm': 5.412, 'NumCorners': 15},
+    'Saudi Arabian Grand Prix': {'LengthKm': 6.174, 'NumCorners': 27},
+    'Australian Grand Prix': {'LengthKm': 5.278, 'NumCorners': 14},
+    'Japanese Grand Prix': {'LengthKm': 5.807, 'NumCorners': 18},
+    'Chinese Grand Prix': {'LengthKm': 5.451, 'NumCorners': 16},
+    'Miami Grand Prix': {'LengthKm': 5.412, 'NumCorners': 19},
+    'Emilia Romagna Grand Prix': {'LengthKm': 4.909, 'NumCorners': 19},
+    'Monaco Grand Prix': {'LengthKm': 3.337, 'NumCorners': 19},
+    'Spanish Grand Prix': {'LengthKm': 4.657, 'NumCorners': 14},
+    'Canadian Grand Prix': {'LengthKm': 4.361, 'NumCorners': 14},
+    'Austrian Grand Prix': {'LengthKm': 4.318, 'NumCorners': 10},
+    'British Grand Prix': {'LengthKm': 5.891, 'NumCorners': 18},
+    'Hungarian Grand Prix': {'LengthKm': 4.381, 'NumCorners': 14},
+    'Belgian Grand Prix': {'LengthKm': 7.004, 'NumCorners': 19},
+    'Dutch Grand Prix': {'LengthKm': 4.259, 'NumCorners': 14},
+    'Italian Grand Prix': {'LengthKm': 5.793, 'NumCorners': 11},
+    'Azerbaijan Grand Prix': {'LengthKm': 6.003, 'NumCorners': 20},
+    'Singapore Grand Prix': {'LengthKm': 4.940, 'NumCorners': 19},
+    'United States Grand Prix': {'LengthKm': 5.513, 'NumCorners': 20},
+    'Mexico City Grand Prix': {'LengthKm': 4.304, 'NumCorners': 17},
+    'Brazilian Grand Prix': {'LengthKm': 4.309, 'NumCorners': 15},
+    'Las Vegas Grand Prix': {'LengthKm': 6.201, 'NumCorners': 17},
+    'Abu Dhabi Grand Prix': {'LengthKm': 5.281, 'NumCorners': 16},
+    'Qatar Grand Prix': {'LengthKm': 5.419, 'NumCorners': 16},
+    # Add more tracks as needed
+}
+
 
 # --- Helper Functions ---
 
@@ -122,7 +154,7 @@ if __name__ == "__main__":
                     quali_features_df = pd.merge(quali_features_df, quali_results, on='Driver', how='left')
                 else:
                     print(f"No qualifying results found for {event_name}. QualiPosition will be NaN.")
-                    quali_features_df['QualiPosition'] = float('NaN')
+                    quali_features_df['QualiPosition'] = float('np.nan') # Corrected to np.nan
 
                 race_session = load_session_data(year, round_num, 'R')
                 if race_session is None:
@@ -143,6 +175,11 @@ if __name__ == "__main__":
                 merged_df['GrandPrix'] = event_name
                 merged_df['EventDate'] = event_date
                 merged_df['RoundNumber'] = round_num
+
+                # --- Add Static Track Characteristics ---
+                track_info = TRACK_CHARACTERISTICS.get(event_name, {'LengthKm': np.nan, 'NumCorners': np.nan})
+                merged_df['TrackLengthKm'] = track_info['LengthKm']
+                merged_df['NumCorners'] = track_info['NumCorners']
 
                 all_races_data.append(merged_df)
 
@@ -174,7 +211,6 @@ if __name__ == "__main__":
         )
 
         # Calculate time-weighted track-specific average performance (crucial for accuracy!)
-        # This calculates the expanding mean of past performance at each specific Grand Prix.
         final_df['TrackAvgQualiPosition'] = final_df.groupby('GrandPrix')['QualiPosition'].transform(
             lambda x: x.shift(1).expanding(min_periods=1).mean()
         )
@@ -183,13 +219,14 @@ if __name__ == "__main__":
         )
 
 
+        # Fill NaNs for all relevant columns
         for col in ['DriverAvgQualiPositionLast3Races', 'DriverAvgRaceFinishPositionLast3Races',
                     'TeamAvgQualiPositionLast3Races', 'TeamAvgRaceFinishPositionLast3Races',
-                    'TrackAvgQualiPosition', 'TrackAvgRaceFinishPosition']:
-            # Use .fillna() with a direct assignment to avoid FutureWarning
+                    'TrackAvgQualiPosition', 'TrackAvgRaceFinishPosition',
+                    'TrackLengthKm', 'NumCorners']: # Added new track features here
             if final_df[col].isnull().any():
                 fill_value = final_df[col].mean()
-                final_df[col] = final_df[col].fillna(fill_value) # Corrected fillna usage
+                final_df[col] = final_df[col].fillna(fill_value)
                 print(f"Filled NaN in {col} with mean: {fill_value:.2f}")
 
 

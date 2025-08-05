@@ -16,6 +16,10 @@ HISTORICAL_DATA_FILE = "f1_historical_data_with_features.csv"
 PREDICTION_CACHE_DIR = 'cache_prediction'
 WINDOW_SIZE = 3 # For lagged features (average over last N races)
 
+# --- Walk-Forward Validation Configuration ---
+INITIAL_TRAIN_ROUNDS = 20 # Number of initial races (rounds) for the first training set
+TEST_ROUNDS_PER_FOLD = 5  # Number of races (rounds) to predict in each test fold
+
 # --- Helper Functions (Copied from data_collection for prediction block needs) ---
 
 def setup_cache(cache_dir):
@@ -43,7 +47,7 @@ if __name__ == "__main__":
     if not os.path.exists(HISTORICAL_DATA_FILE):
         print(f"Error: Historical data file '{HISTORICAL_DATA_FILE}' not found.")
         print("Please run data_collection.py first to generate the data.")
-        exit() # Correctly use exit() here
+        exit()
 
     print(f"Loading data from {HISTORICAL_DATA_FILE}...")
     df = pd.read_csv(HISTORICAL_DATA_FILE)
@@ -63,8 +67,8 @@ if __name__ == "__main__":
         'DriverAvgRaceFinishPositionLast3Races',
         'TeamAvgQualiPositionLast3Races',
         'TeamAvgRaceFinishPositionLast3Races',
-        'TrackAvgQualiPosition', # New Feature
-        'TrackAvgRaceFinishPosition' # New Feature
+        'TrackAvgQualiPosition',
+        'TrackAvgRaceFinishPosition'
     ]
     categorical_features = ['Driver', 'Team'] # FullName is for display, not model input
 
@@ -75,18 +79,18 @@ if __name__ == "__main__":
 
     if df.empty:
         print("No valid data for training after dropping missing target or essential feature values. Cannot train model.")
-        exit() # Correctly use exit() here
+        exit()
     else:
-        # Sort data chronologically for correct time-based split
+        # Sort data chronologically for correct time-based splitting
         df.sort_values(by=['EventDate', 'RoundNumber', 'Driver'], inplace=True)
 
-        X = df[numerical_features + categorical_features]
-        y = df[target]
+        X_full = df[numerical_features + categorical_features]
+        y_full = df[target]
 
         print(f"Features used (numerical): {numerical_features}")
         print(f"Features used (categorical): {categorical_features}")
         print(f"Target used: {target}")
-        print(f"Dataset shape: {X.shape}")
+        print(f"Dataset shape: {X_full.shape}")
 
         # --- Preprocessing Pipeline ---
         preprocessor = ColumnTransformer(
@@ -100,61 +104,134 @@ if __name__ == "__main__":
                                     ('regressor', XGBRegressor(random_state=42))])
 
         # --- Hyperparameter Grid for GridSearchCV ---
-        # Expanded grid for more thorough tuning
         param_grid = {
-            'regressor__n_estimators': [100, 200, 300], # More trees
-            'regressor__learning_rate': [0.01, 0.05, 0.1], # Wider range of learning rates
-            'regressor__max_depth': [3, 5, 7], # Deeper trees
-            'regressor__subsample': [0.7, 0.8, 1.0], # Wider range for sample ratio of training instances
-            'regressor__colsample_bytree': [0.7, 0.8, 1.0], # Wider range for sample ratio of columns
-            'regressor__gamma': [0, 0.1, 0.2], # Min loss reduction to make a split
-            'regressor__min_child_weight': [1, 5, 10] # Min sum of instance weight needed in a child
+            'regressor__n_estimators': [100, 200, 300],
+            'regressor__learning_rate': [0.01, 0.05, 0.1],
+            'regressor__max_depth': [3, 5, 7],
+            'regressor__subsample': [0.7, 0.8, 1.0],
+            'regressor__colsample_bytree': [0.7, 0.8, 1.0],
+            'regressor__gamma': [0, 0.1, 0.2],
+            'regressor__min_child_weight': [1, 5, 10]
         }
 
-        # --- GridSearchCV Setup ---
-        print("\nStarting GridSearchCV for hyperparameter tuning (this may take a while)...")
-        grid_search = GridSearchCV(estimator=pipeline,
-                                   param_grid=param_grid,
-                                   cv=3,
-                                   scoring='neg_mean_absolute_error',
-                                   n_jobs=-1,
-                                   verbose=2)
+        # --- Initial GridSearchCV to find best hyperparameters (run once) ---
+        print("\n--- Performing initial GridSearchCV to find best hyperparameters (this will take a while) ---")
+        initial_tune_df = df.iloc[:int(len(df) * 0.8)].copy()
+        X_initial_tune = initial_tune_df[numerical_features + categorical_features]
+        y_initial_tune = initial_tune_df[target]
 
-        # Time-based split: Train on 80% oldest data, test on 20% newest data
-        split_index = int(len(df) * 0.8)
-        X_train_df, X_test_df = df.iloc[:split_index], df.iloc[split_index:]
-        y_train, y_test = df[target].iloc[:split_index], df[target].iloc[split_index:]
+        grid_search_initial = GridSearchCV(estimator=pipeline,
+                                           param_grid=param_grid,
+                                           cv=3,
+                                           scoring='neg_mean_absolute_error',
+                                           n_jobs=-1,
+                                           verbose=0)
 
-        X_train_features = X_train_df[numerical_features + categorical_features]
-        X_test_features = X_test_df[numerical_features + categorical_features]
+        grid_search_initial.fit(X_initial_tune, y_initial_tune)
+        best_params_from_initial_grid = grid_search_initial.best_params_
+        print("Initial GridSearchCV tuning complete.")
+        print(f"\nBest hyperparameters found from initial search: {best_params_from_initial_grid}")
+        print(f"Best cross-validation MAE (negative) from initial search: {grid_search_initial.best_score_:.2f}")
 
-        print(f"Training data size for GridSearch: {len(X_train_features)}")
-        print(f"Testing data size for final evaluation: {len(X_test_features)}")
 
-        # Fit GridSearchCV on the training data
-        grid_search.fit(X_train_features, y_train)
-        print("GridSearchCV tuning complete.")
+        # --- Walk-Forward Validation ---
+        print("\n--- Starting Walk-Forward Validation (this will take significant time) ---")
+        
+        unique_rounds = df[['Year', 'RoundNumber', 'EventDate']].drop_duplicates().sort_values(by=['EventDate', 'RoundNumber']).reset_index(drop=True)
+        
+        if len(unique_rounds) < INITIAL_TRAIN_ROUNDS + TEST_ROUNDS_PER_FOLD:
+            print(f"Not enough unique rounds for Walk-Forward Validation with initial train size {INITIAL_TRAIN_ROUNDS} and test size {TEST_ROUNDS_PER_FOLD}.")
+            print(f"Total unique rounds available: {len(unique_rounds)}. Skipping WFV.")
+            # Fallback to single train/test split if WFV not possible
+            split_index = int(len(df) * 0.8)
+            X_train_df, X_test_df = df.iloc[:split_index], df.iloc[split_index:]
+            y_train, y_test = df[target].iloc[:split_index], df[target].iloc[split_index:]
 
-        # Get the best model found by GridSearchCV
-        best_model_pipeline = grid_search.best_estimator_
-        print(f"\nBest hyperparameters found: {grid_search.best_params_}")
-        print(f"Best cross-validation MAE (negative): {grid_search.best_score_:.2f}")
+            X_train_features = X_train_df[numerical_features + categorical_features]
+            X_test_features = X_test_df[numerical_features + categorical_features]
 
-        # Make predictions on the test set using the best model
-        y_pred = best_model_pipeline.predict(X_test_features)
+            print(f"\nFalling back to single train/test split for final evaluation.")
+            print(f"Training data size: {len(X_train_features)}")
+            print(f"Testing data size: {len(X_test_features)}")
 
-        # Evaluate the best model
-        mae = mean_absolute_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
+            fallback_pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                                                 ('regressor', XGBRegressor(**{k.replace('regressor__', ''): v for k, v in best_params_from_initial_grid.items() if k.startswith('regressor__')}, random_state=42))])
 
-        print("\n--- Final Model Evaluation (Best XGBoost from GridSearchCV) ---")
-        print(f"Mean Absolute Error (MAE) on test set: {mae:.2f}")
-        print(f"R-squared (R2) Score on test set: {r2:.2f}")
-        print("\nSample Predictions vs Actual (from test set):")
-        results = pd.DataFrame({'Predicted': y_pred, 'Actual': y_test}).reset_index(drop=True)
-        print(results.head(10))
+            fallback_pipeline.fit(X_train_features, y_train)
+            best_model_pipeline = fallback_pipeline
+            y_pred = best_model_pipeline.predict(X_test_features)
+            mae = mean_absolute_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+            
+            print("\n--- Final Model Evaluation (Best XGBoost from GridSearchCV - Single Split) ---")
+            print(f"Mean Absolute Error (MAE) on test set: {mae:.2f}")
+            print(f"R-squared (R2) Score on test set: {r2:.2f}")
+            print("\nSample Predictions vs Actual (from test set):")
+            results = pd.DataFrame({'Predicted': y_pred, 'Actual': y_test}).reset_index(drop=True)
+            print(results.head(10))
 
-        # --- Dynamic Prediction for the Next Upcoming Race ---
+        else:
+            wfv_maes = []
+            wfv_r2s = []
+            
+            for i in range(INITIAL_TRAIN_ROUNDS, len(unique_rounds), TEST_ROUNDS_PER_FOLD):
+                train_rounds_end_idx = i
+                test_rounds_start_idx = i
+                test_rounds_end_idx = min(i + TEST_ROUNDS_PER_FOLD, len(unique_rounds))
+
+                if test_rounds_start_idx >= len(unique_rounds):
+                    break
+
+                train_end_date = unique_rounds.iloc[train_rounds_end_idx - 1]['EventDate']
+                test_start_date = unique_rounds.iloc[test_rounds_start_idx]['EventDate']
+                test_end_date = unique_rounds.iloc[test_rounds_end_idx - 1]['EventDate']
+
+                train_df_fold = df[df['EventDate'] <= train_end_date].copy()
+                test_df_fold = df[(df['EventDate'] > train_end_date) & (df['EventDate'] <= test_end_date)].copy()
+                
+                if test_df_fold.empty:
+                    continue
+
+                X_train_fold = train_df_fold[numerical_features + categorical_features]
+                y_train_fold = train_df_fold[target]
+                X_test_fold = test_df_fold[numerical_features + categorical_features]
+                y_test_fold = test_df_fold[target]
+
+                if X_train_fold.empty or X_test_fold.empty:
+                    print(f"Skipping fold ending {train_end_date.date()} due to empty train or test set.")
+                    continue
+
+                print(f"\n--- WFV Fold: Train up to {train_end_date.date()}, Test from {test_start_date.date()} to {test_end_date.date()} ---")
+                print(f"Train data size: {len(X_train_fold)}, Test data size: {len(X_test_fold)}")
+
+                regressor_params_for_fold = {k.replace('regressor__', ''): v for k, v in best_params_from_initial_grid.items() if k.startswith('regressor__')}
+                fold_pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                                                 ('regressor', XGBRegressor(**regressor_params_for_fold, random_state=42))])
+                fold_pipeline.fit(X_train_fold, y_train_fold)
+                fold_model = fold_pipeline
+
+                y_pred_fold = fold_model.predict(X_test_fold)
+                fold_mae = mean_absolute_error(y_test_fold, y_pred_fold)
+                fold_r2 = r2_score(y_test_fold, y_pred_fold)
+
+                wfv_maes.append(fold_mae)
+                wfv_r2s.append(fold_r2)
+
+                print(f"Fold MAE: {fold_mae:.2f}, Fold R2: {fold_r2:.2f}")
+
+            print("\n--- Walk-Forward Validation Summary ---")
+            print(f"Average MAE across folds: {np.mean(wfv_maes):.2f}")
+            print(f"Average R2 across folds: {np.mean(wfv_r2s):.2f}")
+
+            print("\n--- Training final model on entire dataset for next race prediction ---")
+            regressor_params_final = {k.replace('regressor__', ''): v for k, v in best_params_from_initial_grid.items() if k.startswith('regressor__')}
+            best_model_pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                                                 ('regressor', XGBRegressor(**regressor_params_final, random_state=42))])
+            best_model_pipeline.fit(X_full, y_full)
+            print("Final model training complete.")
+
+
+        # --- Dynamic Prediction for the Next Upcoming Race (Original Logic) ---
         print("\n--- Predicting Lineup for the Next Upcoming Race ---")
         try:
             current_year = datetime.now().year
@@ -185,7 +262,6 @@ if __name__ == "__main__":
                 teams_for_prediction_list = []
                 full_names_for_prediction_list = []
 
-                # Attempt to get drivers from the upcoming qualifying session
                 quali_session_next_race = load_session_data_for_prediction(next_race_year, next_race_round, 'Q')
                 if quali_session_next_race and quali_session_next_race.drivers:
                     for d_num in quali_session_next_race.drivers:
@@ -193,7 +269,6 @@ if __name__ == "__main__":
                         drivers_for_prediction_list.append(driver_info['Abbreviation'])
                         teams_for_prediction_list.append(driver_info['TeamName'])
                         full_names_for_prediction_list.append(f"{driver_info['FirstName']} {driver_info['LastName']}")
-                    # Sort lists consistently
                     drivers_for_prediction_list, teams_for_prediction_list, full_names_for_prediction_list = \
                         zip(*sorted(zip(drivers_for_prediction_list, teams_for_prediction_list, full_names_for_prediction_list)))
                     drivers_for_prediction_list = list(drivers_for_prediction_list)
@@ -202,17 +277,15 @@ if __name__ == "__main__":
                 else:
                     print(f"Warning: Could not load qualifying session for {next_race_name} to get actual drivers.")
                     print("Using drivers from the last race in the training set for prediction input as a fallback.")
-                    if not X_train_df.empty:
-                        last_training_race_drivers_df = X_train_df[X_train_df['EventDate'] == X_train_df['EventDate'].max()]
+                    if not X_full.empty:
+                        last_training_race_drivers_df = df[df['EventDate'] == df['EventDate'].max()]
                         if not last_training_race_drivers_df.empty:
                             drivers_for_prediction_list = last_training_race_drivers_df['Driver'].unique().tolist()
-                            # Create a mapping from driver abbreviation to full name and team from the full df
                             driver_details_map = df[df['Driver'].isin(drivers_for_prediction_list)][['Driver', 'Team', 'FullName']].drop_duplicates().set_index('Driver')
 
-                            # Use .get() with a default value for safety
                             teams_for_prediction_list = [driver_details_map['Team'].get(d, "Unknown") for d in drivers_for_prediction_list]
                             full_names_for_prediction_list = [driver_details_map['FullName'].get(d, d) for d in drivers_for_prediction_list]
-                            drivers_for_prediction_list = sorted(list(drivers_for_prediction_list)) # Ensure consistent order
+                            drivers_for_prediction_list = sorted(list(drivers_for_prediction_list))
                         else:
                             print("Fallback to last training race drivers failed: Last training race data is empty.")
                     else:
@@ -222,17 +295,15 @@ if __name__ == "__main__":
                     print("Could not determine drivers for prediction. Skipping dynamic prediction.")
                     exit()
 
-                # Calculate lagged features based on data *before* this next race
                 historical_data_for_prediction = df[df['EventDate'] < next_race_event['EventDate']].copy()
 
-                # Calculate track-specific averages for the upcoming track from historical data
-                track_avg_quali = historical_data_for_prediction[historical_data_for_prediction['GrandPrix'] == next_race_name]['QualiPosition'].mean()
-                track_avg_race = historical_data_for_prediction[historical_data_for_prediction['GrandPrix'] == next_race_name]['RaceFinishPosition'].mean()
+                track_avg_quali_for_pred = historical_data_for_prediction[historical_data_for_prediction['GrandPrix'] == next_race_name]['QualiPosition'].mean()
+                track_avg_race_for_pred = historical_data_for_prediction[historical_data_for_prediction['GrandPrix'] == next_race_name]['RaceFinishPosition'].mean()
 
-                if pd.isna(track_avg_quali):
-                    track_avg_quali = df['TrackAvgQualiPosition'].mean()
-                if pd.isna(track_avg_race):
-                    track_avg_race = df['TrackAvgRaceFinishPosition'].mean()
+                if pd.isna(track_avg_quali_for_pred):
+                    track_avg_quali_for_pred = df['TrackAvgQualiPosition'].mean()
+                if pd.isna(track_avg_race_for_pred):
+                    track_avg_race_for_pred = df['TrackAvgRaceFinishPosition'].mean()
 
 
                 if historical_data_for_prediction.empty:
@@ -268,12 +339,11 @@ if __name__ == "__main__":
                     for col in ['DriverAvgQualiPositionLast3Races', 'DriverAvgRaceFinishPositionLast3Races',
                                 'TeamAvgQualiPositionLast3Races', 'TeamAvgRaceFinishPositionLast3Races']:
                         if latest_driver_performance[col].isnull().any():
-                            latest_driver_performance[col].fillna(df[col].mean(), inplace=True)
+                            latest_driver_performance[col] = latest_driver_performance[col].fillna(df[col].mean())
                         if latest_team_performance[col].isnull().any():
-                            latest_team_performance[col].fillna(df[col].mean(), inplace=True)
+                            latest_team_performance[col] = latest_team_performance[col].fillna(df[col].mean())
 
 
-                # Prepare the input data for prediction
                 prediction_data_rows = []
                 for i, driver_code in enumerate(drivers_for_prediction_list):
                     team_name = teams_for_prediction_list[i] if i < len(teams_for_prediction_list) else "Unknown"
@@ -307,8 +377,8 @@ if __name__ == "__main__":
                         'DriverAvgRaceFinishPositionLast3Races': driver_avg_race,
                         'TeamAvgQualiPositionLast3Races': team_avg_quali,
                         'TeamAvgRaceFinishPositionLast3Races': team_avg_race,
-                        'TrackAvgQualiPosition': track_avg_quali,
-                        'TrackAvgRaceFinishPosition': track_avg_race
+                        'TrackAvgQualiPosition': track_avg_quali_for_pred,
+                        'TrackAvgRaceFinishPosition': track_avg_race_for_pred
                     })
 
                 prediction_input_df = pd.DataFrame(prediction_data_rows)
