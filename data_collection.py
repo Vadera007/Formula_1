@@ -12,7 +12,6 @@ MAIN_CACHE_DIR = 'cache_main'
 WINDOW_SIZE = 3 # For lagged features (average over last N races)
 
 # --- Static Track Characteristics (Manually Curated - Add more as needed!) ---
-# These are approximate values. You can refine them or add more tracks.
 TRACK_CHARACTERISTICS = {
     'Bahrain Grand Prix': {'LengthKm': 5.412, 'NumCorners': 15},
     'Saudi Arabian Grand Prix': {'LengthKm': 6.174, 'NumCorners': 27},
@@ -38,7 +37,6 @@ TRACK_CHARACTERISTICS = {
     'Las Vegas Grand Prix': {'LengthKm': 6.201, 'NumCorners': 17},
     'Abu Dhabi Grand Prix': {'LengthKm': 5.281, 'NumCorners': 16},
     'Qatar Grand Prix': {'LengthKm': 5.419, 'NumCorners': 16},
-    # Add more tracks as needed
 }
 
 
@@ -60,84 +58,104 @@ def load_session_data(year, round_num, session_type):
         print(f"Successfully loaded {session_type} session for {year} Round {round_num}.")
         return session
     except Exception as e:
-        print(f"Error loading session {year} Round {round_num} {session_type}: {e}")
+        print(f"Could not load {session_type} for {year} Round {round_num}: {e}")
         return None
 
 def get_driver_features(session):
     """Extracts basic features for each driver in a session, including full name."""
     if session is None:
         return pd.DataFrame()
-
     driver_data = []
     for driver_num in session.drivers:
         try:
             driver_info = session.get_driver(driver_num)
             driver_code = driver_info['Abbreviation']
-            first_name = driver_info['FirstName']
-            last_name = driver_info['LastName']
-            full_name = f"{first_name} {last_name}"
+            full_name = f"{driver_info['FirstName']} {driver_info['LastName']}"
             team_name = driver_info['TeamName']
-
-            laps = session.laps.pick_drivers(driver_code)
+            laps = session.laps.pick_drivers([driver_code])
 
             if not laps.empty:
                 valid_laps = laps.loc[laps['IsAccurate']]
-                avg_lap_time = valid_laps['LapTime'].dt.total_seconds().mean() if not valid_laps.empty else None
+                avg_lap_time = valid_laps['LapTime'].dt.total_seconds().median() if not valid_laps.empty else np.nan
                 laps_completed = len(laps)
-
                 weather_data = session.weather_data
                 air_temp = weather_data['AirTemp'].iloc[0] if not weather_data.empty else None
                 track_temp = weather_data['TrackTemp'].iloc[0] if not weather_data.empty else None
                 rain_status = weather_data['Rainfall'].iloc[0] if not weather_data.empty else 0
 
                 driver_data.append({
-                    'Driver': driver_code,
-                    'FullName': full_name, # Added FullName
-                    'Team': team_name,
-                    'AvgLapTime': avg_lap_time,
-                    'LapsCompleted': laps_completed,
-                    'AirTemp': air_temp,
-                    'TrackTemp': track_temp,
-                    'Rainfall': rain_status
+                    'Driver': driver_code, 'FullName': full_name, 'Team': team_name,
+                    'AvgLapTime': avg_lap_time, 'LapsCompleted': laps_completed,
+                    'AirTemp': air_temp, 'TrackTemp': track_temp, 'Rainfall': rain_status
                 })
         except Exception as e:
             print(f"Error processing driver {driver_num} in session {session.event['EventName']}: {e}")
             continue
     return pd.DataFrame(driver_data)
 
-# --- Main Data Collection Logic ---
+def get_practice_features(year, round_num, race_drivers_list):
+    """
+    Loads all practice sessions for a race weekend and calculates key performance features.
+    - PracticeFastestLap: The best single lap time across all FP sessions.
+    - AvgLongRunPace: The median pace from the driver's best long run (stint > 4 laps).
+    """
+    practice_sessions = []
+    for fp in ['FP1', 'FP2', 'FP3']:
+        session = load_session_data(year, round_num, fp)
+        if session:
+            practice_sessions.append(session.laps)
+    
+    if not practice_sessions:
+        print("No practice sessions found. Skipping practice feature extraction.")
+        return pd.DataFrame()
 
+    all_practice_laps = pd.concat(practice_sessions)
+    practice_features = []
+
+    for driver in race_drivers_list:
+        driver_laps = all_practice_laps.pick_drivers([driver])
+        if driver_laps.empty:
+            continue
+
+        fastest_lap = driver_laps['LapTime'].min().total_seconds() if not driver_laps.empty else np.nan
+
+        long_run_paces = []
+        stints = driver_laps.groupby('Stint')
+        for _, stint_laps in stints:
+            if len(stint_laps) >= 5:
+                long_run_pace = stint_laps['LapTime'].median().total_seconds()
+                long_run_paces.append(long_run_pace)
+        
+        avg_long_run_pace = min(long_run_paces) if long_run_paces else np.nan
+
+        practice_features.append({
+            'Driver': driver,
+            'PracticeFastestLap': fastest_lap,
+            'AvgLongRunPace': avg_long_run_pace
+        })
+
+    return pd.DataFrame(practice_features)
+
+# --- Main Data Collection Logic ---
 if __name__ == "__main__":
     current_year = datetime.now().year
     years_to_collect = list(range(START_YEAR, current_year + 1))
-
     all_races_data = []
-
     setup_cache(MAIN_CACHE_DIR)
 
     for year in years_to_collect:
         print(f"\n--- Collecting data for {year} season ---")
         try:
             schedule = fastf1.get_event_schedule(year)
-
-            if schedule['EventDate'].dt.tz is None:
-                schedule['EventDate'] = schedule['EventDate'].dt.tz_localize(pytz.utc)
-            else:
-                schedule['EventDate'] = schedule['EventDate'].dt.tz_convert(pytz.utc)
-
+            schedule['EventDate'] = schedule['EventDate'].dt.tz_localize(pytz.utc) if schedule['EventDate'].dt.tz is None else schedule['EventDate'].dt.tz_convert(pytz.utc)
             if year == current_year:
                 now_utc = pd.Timestamp.now(tz='UTC')
                 schedule = schedule[schedule['EventDate'] < now_utc]
 
             for index, event in schedule.iterrows():
-                event_name = event['EventName']
-                round_num = event['RoundNumber']
-                event_date = event['EventDate']
-
-                if round_num == 0:
-                    print(f"Skipping Pre-Season Testing for {year}.")
+                event_name, round_num = event['EventName'], event['RoundNumber']
+                if "testing" in event_name.lower() or round_num == 0:
                     continue
-
                 print(f"\nProcessing {year} {event_name} (Round {round_num})...")
 
                 quali_session = load_session_data(year, round_num, 'Q')
@@ -145,96 +163,96 @@ if __name__ == "__main__":
                     print(f"Skipping {event_name} due to missing Qualifying data.")
                     continue
 
+                race_drivers_list = [quali_session.get_driver(d)['Abbreviation'] for d in quali_session.drivers]
+                practice_features_df = get_practice_features(year, round_num, race_drivers_list)
                 quali_features_df = get_driver_features(quali_session)
 
                 if not quali_session.results.empty:
                     quali_results = quali_session.results[['Abbreviation', 'Position']].copy()
                     quali_results.rename(columns={'Abbreviation': 'Driver', 'Position': 'QualiPosition'}, inplace=True)
-                    quali_results['QualiPosition'] = pd.to_numeric(quali_results['QualiPosition'], errors='coerce')
                     quali_features_df = pd.merge(quali_features_df, quali_results, on='Driver', how='left')
-                else:
-                    print(f"No qualifying results found for {event_name}. QualiPosition will be NaN.")
-                    quali_features_df['QualiPosition'] = float('np.nan') # Corrected to np.nan
-
+                
                 race_session = load_session_data(year, round_num, 'R')
-                if race_session is None:
-                    print(f"Skipping {event_name} due to missing Race data.")
-                    continue
-
+                if race_session is None: continue
                 if not race_session.results.empty:
                     race_results = race_session.results[['Abbreviation', 'Position']].copy()
                     race_results.rename(columns={'Abbreviation': 'Driver', 'Position': 'RaceFinishPosition'}, inplace=True)
-                    race_results['RaceFinishPosition'] = pd.to_numeric(race_results['RaceFinishPosition'], errors='coerce')
-                else:
-                    print(f"No race results found for {event_name}. RaceFinishPosition will be NaN.")
-                    continue
+                else: continue
 
                 merged_df = pd.merge(quali_features_df, race_results, on='Driver', how='inner')
+                if not practice_features_df.empty:
+                    merged_df = pd.merge(merged_df, practice_features_df, on='Driver', how='left')
 
+                print("Calculating Tier 1 Strategy and Pace Features...")
+                tier1_features_list = []
+                for driver_code in merged_df['Driver']:
+                    try:
+                        laps = race_session.laps.pick_drivers([driver_code])
+                        num_pits = len(laps.loc[laps['PitInTime'].notna()])
+                        accurate_laps = laps.loc[laps['IsAccurate']]
+                        starting_compound = laps.pick_track_status('1')['Compound'].iloc[0] if not laps.pick_track_status('1').empty else 'UNKNOWN'
+                        laps_completed_val = merged_df.loc[merged_df['Driver'] == driver_code, 'LapsCompleted'].iloc[0]
+                        avg_stint_length = laps_completed_val / (num_pits + 1) if laps_completed_val > 0 else 0
+                        tier1_features_list.append({
+                            'Driver': driver_code, 'NumPitStops': num_pits, 'StartingTyreCompound': starting_compound,
+                            'AvgStintLength': avg_stint_length,
+                            'MedianLapTime': accurate_laps['LapTime'].dt.total_seconds().median() if not accurate_laps.empty else np.nan,
+                            'StdDevLapTime': accurate_laps['LapTime'].dt.total_seconds().std() if not accurate_laps.empty else np.nan,
+                            'AvgSector2Pace': accurate_laps['Sector2Time'].dt.total_seconds().mean() if not accurate_laps.empty else np.nan,
+                        })
+                    except Exception as e:
+                        print(f"Could not calculate Tier 1 features for {driver_code}: {e}")
+                
+                if tier1_features_list:
+                    tier1_df = pd.DataFrame(tier1_features_list)
+                    merged_df = pd.merge(merged_df, tier1_df, on='Driver', how='left')
+                
                 merged_df['Year'] = year
                 merged_df['GrandPrix'] = event_name
-                merged_df['EventDate'] = event_date
+                merged_df['EventDate'] = event['EventDate']
                 merged_df['RoundNumber'] = round_num
-
-                # --- Add Static Track Characteristics ---
-                track_info = TRACK_CHARACTERISTICS.get(event_name, {'LengthKm': np.nan, 'NumCorners': np.nan})
-                merged_df['TrackLengthKm'] = track_info['LengthKm']
-                merged_df['NumCorners'] = track_info['NumCorners']
-
+                track_info = TRACK_CHARACTERISTICS.get(event_name, {})
+                merged_df['TrackLengthKm'] = track_info.get('LengthKm', np.nan)
+                merged_df['NumCorners'] = track_info.get('NumCorners', np.nan)
                 all_races_data.append(merged_df)
-
         except Exception as e:
-            print(f"Error processing year {year}: {e}")
-            continue
+            print(f"Critical error processing year {year}: {e}")
 
     if all_races_data:
         final_df = pd.concat(all_races_data, ignore_index=True)
-
-        print("\n--- Engineering historical performance features ---")
-        # Sort data chronologically for correct rolling calculations
         final_df.sort_values(by=['EventDate', 'RoundNumber', 'Driver'], inplace=True)
-
-        # Calculate rolling averages for drivers
-        final_df['DriverAvgQualiPositionLast3Races'] = final_df.groupby('Driver')['QualiPosition'].transform(
-            lambda x: x.shift(1).rolling(window=WINDOW_SIZE, min_periods=1).mean()
-        )
-        final_df['DriverAvgRaceFinishPositionLast3Races'] = final_df.groupby('Driver')['RaceFinishPosition'].transform(
-            lambda x: x.shift(1).rolling(window=WINDOW_SIZE, min_periods=1).mean()
-        )
-
-        # Calculate rolling averages for teams
-        final_df['TeamAvgQualiPositionLast3Races'] = final_df.groupby('Team')['QualiPosition'].transform(
-            lambda x: x.shift(1).rolling(window=WINDOW_SIZE, min_periods=1).mean()
-        )
-        final_df['TeamAvgRaceFinishPositionLast3Races'] = final_df.groupby('Team')['RaceFinishPosition'].transform(
-            lambda x: x.shift(1).rolling(window=WINDOW_SIZE, min_periods=1).mean()
-        )
-
-        # Calculate time-weighted track-specific average performance (crucial for accuracy!)
-        final_df['TrackAvgQualiPosition'] = final_df.groupby('GrandPrix')['QualiPosition'].transform(
-            lambda x: x.shift(1).expanding(min_periods=1).mean()
-        )
-        final_df['TrackAvgRaceFinishPosition'] = final_df.groupby('GrandPrix')['RaceFinishPosition'].transform(
-            lambda x: x.shift(1).expanding(min_periods=1).mean()
-        )
-
-
-        # Fill NaNs for all relevant columns
-        for col in ['DriverAvgQualiPositionLast3Races', 'DriverAvgRaceFinishPositionLast3Races',
-                    'TeamAvgQualiPositionLast3Races', 'TeamAvgRaceFinishPositionLast3Races',
-                    'TrackAvgQualiPosition', 'TrackAvgRaceFinishPosition',
-                    'TrackLengthKm', 'NumCorners']: # Added new track features here
-            if final_df[col].isnull().any():
-                fill_value = final_df[col].mean()
+        print("\n--- Engineering historical performance features ---")
+        
+        # Lagged Features
+        final_df['DriverAvgQualiPositionLast3Races'] = final_df.groupby('Driver')['QualiPosition'].transform(lambda x: x.shift(1).rolling(WINDOW_SIZE, min_periods=1).mean())
+        final_df['DriverAvgRaceFinishPositionLast3Races'] = final_df.groupby('Driver')['RaceFinishPosition'].transform(lambda x: x.shift(1).rolling(WINDOW_SIZE, min_periods=1).mean())
+        final_df['DriverStdDevRaceFinishPositionLast3Races'] = final_df.groupby('Driver')['RaceFinishPosition'].transform(lambda x: x.shift(1).rolling(WINDOW_SIZE, min_periods=1).std()).fillna(0)
+        final_df['TeamAvgQualiPositionLast3Races'] = final_df.groupby('Team')['QualiPosition'].transform(lambda x: x.shift(1).rolling(WINDOW_SIZE, min_periods=1).mean())
+        final_df['TeamAvgRaceFinishPositionLast3Races'] = final_df.groupby('Team')['RaceFinishPosition'].transform(lambda x: x.shift(1).rolling(WINDOW_SIZE, min_periods=1).mean())
+        
+        # Expanding Track Averages
+        final_df['TrackAvgQualiPosition'] = final_df.groupby('GrandPrix')['QualiPosition'].transform(lambda x: x.shift(1).expanding(min_periods=1).mean())
+        final_df['TrackAvgRaceFinishPosition'] = final_df.groupby('GrandPrix')['RaceFinishPosition'].transform(lambda x: x.shift(1).expanding(min_periods=1).mean())
+        
+        # NaN Filling
+        cols_to_fill = [
+            'DriverAvgQualiPositionLast3Races', 'DriverAvgRaceFinishPositionLast3Races',
+            'TeamAvgQualiPositionLast3Races', 'TeamAvgRaceFinishPositionLast3Races',
+            'TrackAvgQualiPosition', 'TrackAvgRaceFinishPosition', 'TrackLengthKm', 'NumCorners',
+            'NumPitStops', 'AvgStintLength', 'MedianLapTime', 'StdDevLapTime', 'AvgSector2Pace',
+            'PracticeFastestLap', 'AvgLongRunPace'
+        ]
+        for col in cols_to_fill:
+            if col in final_df.columns and final_df[col].isnull().any():
+                fill_value = 0 if 'StdDev' in col else final_df[col].mean()
+                # --- CORRECTED LINE TO AVOID WARNING ---
                 final_df[col] = final_df[col].fillna(fill_value)
-                print(f"Filled NaN in {col} with mean: {fill_value:.2f}")
-
+                print(f"Filled NaN in {col} with value: {fill_value:.2f}")
 
         print("\n--- Consolidated Historical Data with New Features (Sample) ---")
-        print(final_df.head())
-        print(f"\nTotal rows collected: {len(final_df)}")
-
+        print(final_df[['Driver', 'RaceFinishPosition', 'PracticeFastestLap', 'AvgLongRunPace']].head())
         final_df.to_csv(HISTORICAL_DATA_FILE, index=False)
         print(f"\nConsolidated data saved to {HISTORICAL_DATA_FILE}")
     else:
-        print("\nNo data collected for the specified years. Please check for errors during data loading.")
+        print("\nNo data collected. Please check for errors.")
+
