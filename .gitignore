@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# FastF1 cache directories
+cache/
+cache_main/
+cache_prediction/
+
+# Data files
+*.csv
+*.pkl
+
+
+
+

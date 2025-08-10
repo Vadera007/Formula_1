@@ -1,0 +1,155 @@
+/* Import modern fonts from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Bebas+Neue&family=Inter:wght@300;400;600&display=swap');
+
+/* Main App Background */
+body, .stApp {
+    background: #0d0d0d;
+    color: #f0f0f0;
+    font-family: 'Inter', sans-serif;
+}
+.main-content {
+    padding: 0 5vw 60px 5vw;
+    max-width: 1200px;
+    margin: auto;
+}
+
+/* Hero Section */
+.hero-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 6em;
+    font-weight: 700;
+    text-align: center;
+    color: #ffffff;
+    text-shadow: 0 0 15px #e10600, 0 0 30px #e10600;
+    letter-spacing: 2px;
+    padding-top: 60px;
+    margin-bottom: 0;
+    animation: fadeIn 2s ease-in-out;
+}
+.hero-subtitle {
+    font-family: 'Inter', sans-serif;
+    font-size: 1.2em;
+    text-align: center;
+    color: #d1d1d1;
+    margin-top: 10px;
+    margin-bottom: 60px;
+    animation: fadeIn 2.5s ease-in-out;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Custom Header/Divider Style */
+h2, .st-emotion-cache-10n2b1a {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2.5em;
+    color: #fff;
+    text-shadow: 0 0 5px #e10600;
+    border-top: 2px solid #e10600;
+    margin-bottom: 2rem;
+    box-shadow: 0 0 10px #e10600;
+    animation: pulse 4s infinite;
+    text-align: center;
+    padding-top: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+@keyframes pulse {
+    0% { box-shadow: 0 0 10px #e10600; }
+    50% { box-shadow: 0 0 20px #e10600; }
+    100% { box-shadow: 0 0 10px #e10600; }
+}
+
+/* Podium Card Styling */
+.podium-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 20px;
+    margin-bottom: 40px;
+    padding-top: 50px;
+}
+.podium-card {
+    background: #1a1a1a;
+    border-radius: 15px;
+    padding: 30px;
+    text-align: center;
+    transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+    flex: 1;
+    position: relative;
+    border: 2px solid transparent;
+}
+
+/* Initial podium card positions */
+.podium-card.p1 { transform: translateY(-50px); background: #2a2a2a; }
+.podium-card.p2 { transform: translateY(-25px); background: #202020; }
+.podium-card.p3 { transform: translateY(-25px); background: #202020; }
+
+/* Hover effects with color-specific borders and glow */
+.podium-card.p1:hover {
+    transform: translateY(-55px) scale(1.05);
+    border-color: #FFD700;
+    box-shadow: 0 0 20px #FFD700, 0 0 30px #FFD700, 0 15px 30px rgba(255, 215, 0, 0.4);
+}
+.podium-card.p2:hover {
+    transform: translateY(-30px) scale(1.05);
+    border-color: #C0C0C0;
+    box-shadow: 0 0 20px #C0C0C0, 0 0 30px #C0C0C0, 0 15px 30px rgba(192, 192, 192, 0.4);
+}
+.podium-card.p3:hover {
+    transform: translateY(-30px) scale(1.05);
+    border-color: #CD7F32;
+    box-shadow: 0 0 20px #CD7F32, 0 0 30px #CD7F32, 0 15px 30px rgba(205, 127, 50, 0.4);
+}
+
+.podium-rank {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 3em;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+.podium-card.p1 .podium-rank { color: #FFD700; }
+.podium-card.p2 .podium-rank { color: #C0C0C0; }
+.podium-card.p3 .podium-rank { color: #CD7F32; }
+.podium-card .driver-name {
+    font-family: 'Roboto Mono', monospace;
+    font-size: 1.4em;
+    font-weight: 700;
+    color: #ffffff;
+}
+.podium-card .team-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 1.0em;
+    color: #a0a0a0;
+}
+
+/* Full Grid Table Styling */
+.stDataFrame {
+    background-color: #1a1a1a;
+    border-radius: 10px;
+    border: 1px solid #333;
+    box-shadow: 0 0 10px rgba(225, 6, 0, 0.2);
+}
+.stDataFrame th {
+    background-color: #333;
+    color: #ffffff;
+    font-weight: 600;
+    font-family: 'Bebas Neue', sans-serif;
+    border-bottom: 2px solid #e10600;
+}
+.stDataFrame tr:hover {
+    background-color: #2a2a2a;
+}
+
+/* Footer Styling */
+.footer {
+    position: static;
+    width: 100%;
+    background: #1a1a1a;
+    color: #777;
+    text-align: center;
+    padding: 20px 0;
+    font-size: 14px;
+    border-top: 1px solid #333;
+}
