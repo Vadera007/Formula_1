@@ -5,10 +5,6 @@ fastf1
 pytz
 scikit-learn
 joblib
-flask
-sqlite3
 xgboost
 lightgbm
 catboost
-
-    
