@@ -2,8 +2,8 @@ name: F1 Predictor Pipeline
 
 on:
   schedule:
-    # This workflow will run every day at 12:00 PM UTC
-    - cron: '0 12 * * *'
+    # This workflow will run every 6 hours every day
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
