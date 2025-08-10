@@ -144,9 +144,9 @@ body, .stApp {
     z-index: 1000;
 }
 
-/* Hide the Streamlit three-dots menu */
-.st-emotion-cache-s1h2w9 {
-    visibility: hidden;
+/* Hide the Streamlit three-dots menu with a more reliable selector */
+[data-testid="stToolbar"] {
+    display: none;
 }
 </style>
 """, unsafe_allow_html=True)
