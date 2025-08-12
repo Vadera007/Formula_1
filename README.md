@@ -57,6 +57,10 @@ Model Performance
 
 The "Trinity" ensemble model is highly accurate, consistently achieving an average Normalized Discounted Cumulative Gain (NDCG) score above 0.95 during cross-validation. An NDCG score measures the quality of a ranked list, and a score this high indicates that the model's predicted finishing order is, on average, over 95% similar to the actual race outcomes, demonstrating exceptional predictive power.
 
+Automation:
+
+The entire data and modeling pipeline is fully automated using GitHub Actions. The pipeline is scheduled to run every 6 hours, ensuring that the data is always up-to-date with the latest race results and that the prediction model is continuously retrained with the most current information. This means the deployed website will always show the latest, most accurate predictions without any manual intervention.
+
 How to Run
 
 Follow these steps to set up and run the project on your local machine.
