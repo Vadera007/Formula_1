@@ -15,6 +15,9 @@ The prediction engine, the 'Trinity' ensemble, considers a wide range of factors
 
 Features & Data Points
 
+The "Trinity" Ensemble Model:
+
+The model is an ensemble of three powerful gradient boosting rankers: XGBoost, LightGBM, and CatBoost. Instead of predicting an exact position, these models are trained to learn the correct order of drivers. The final prediction is an average of their outputs, making it more robust and accurate than any single model.
 
 The model's accuracy is driven by a comprehensive set of features engineered from official Formula 1 data. The "Trinity" ensemble analyzes the following key areas:
 
