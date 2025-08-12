@@ -9,18 +9,19 @@ on:
 jobs:
   build-and-update:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
         with:
-          # We need to fetch all history for Git LFS
           fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11' # Use a specific Python version
+          python-version: '3.11' 
 
       - name: Install Git LFS
         run: |
@@ -36,7 +37,7 @@ jobs:
       - name: Run the update pipeline
         run: python run_pipeline.py
 
-      # --- NEW: Commit and Push Changes ---
+      # --- Commit and Push Changes ---
       - name: Commit and push updated data and models
         run: |
           git config --global user.name 'GitHub Actions Bot'
@@ -50,9 +51,6 @@ jobs:
           else
             echo "No changes to commit."
           fi
-
-
-
 
 
 
