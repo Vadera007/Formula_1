@@ -55,6 +55,11 @@ def main():
         print(f"Error loading data from {DB_FILE}: {e}")
         return
 
+    # --- FIX: Remove rows where the target variable is missing ---
+    if df['RaceFinishPosition'].isnull().any():
+        print(f"Warning: Found {df['RaceFinishPosition'].isnull().sum()} rows with missing RaceFinishPosition. Removing them before training.")
+        df.dropna(subset=['RaceFinishPosition'], inplace=True)
+
     df['race_id'] = df['Year'].astype(str) + '-' + df['RoundNumber'].astype(str)
     num_races = df['race_id'].nunique()
     print(f"Preparing to train on {len(df)} rows covering {num_races} unique races.")
@@ -66,9 +71,6 @@ def main():
     y = df['RaceFinishPosition']
     groups = df['race_id']
     
-    # --- FIX: Calculate group sizes correctly for XGBoost/LightGBM ---
-    # This creates an array like [20, 20, 18, 22, ...] where each number
-    # is the count of drivers in that race.
     group_sizes = X.groupby(groups).size().to_numpy()
 
     gkf = GroupKFold(n_splits=3)
@@ -78,7 +80,6 @@ def main():
     
     # --- XGBoost ---
     print("Training XGBoost...")
-    # --- FIX: Added enable_categorical=True ---
     prod_xgb = xgb.XGBRanker(objective='rank:ndcg', eval_metric=['ndcg@10'], n_estimators=200, learning_rate=0.1, tree_method='hist', random_state=42, enable_categorical=True)
     prod_xgb.fit(X, y, group=group_sizes, verbose=False)
     joblib.dump(prod_xgb, os.path.join(MODEL_DIR, 'xgb_model.joblib'))
@@ -108,11 +109,8 @@ def main():
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         
-        # Get group info for the training and validation sets
         groups_train = X_train.groupby(groups.iloc[train_idx]).size().to_numpy()
         
-        # Train temporary models for this fold
-        # --- FIX: Added enable_categorical=True ---
         xgb_cv = xgb.XGBRanker(objective='rank:ndcg', random_state=42, enable_categorical=True)
         xgb_cv.fit(X_train, y_train, group=groups_train)
         
@@ -122,13 +120,11 @@ def main():
         cat_cv = cb.CatBoostRanker(loss_function='YetiRank', random_seed=42, verbose=0)
         cat_cv.fit(X_train, y_train, group_id=groups.iloc[train_idx], cat_features=cat_features_indices)
 
-        # Predict scores for the validation set
         xgb_pred = xgb_cv.predict(X_val)
         lgbm_pred = lgbm_cv.predict(X_val)
         cat_pred = cat_cv.predict(X_val)
         ensemble_pred = (xgb_pred + lgbm_pred + cat_pred) / 3.0
         
-        # Calculate NDCG for this fold
         xgb_scores.append(calculate_ndcg(y_val, xgb_pred))
         lgbm_scores.append(calculate_ndcg(y_val, lgbm_pred))
         cat_scores.append(calculate_ndcg(y_val, cat_pred))
@@ -144,9 +140,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
 
 
 
