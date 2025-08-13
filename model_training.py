@@ -80,23 +80,23 @@ def main():
     
     # --- XGBoost ---
     print("Training XGBoost...")
-    prod_xgb = xgb.XGBRanker(objective='rank:ndcg', eval_metric=['ndcg@10'], n_estimators=200, learning_rate=0.1, tree_method='hist', random_state=42, enable_categorical=True)
-    prod_xgb.fit(X, y, group=group_sizes, verbose=False)
+    prod_xgb = xgb.XGBRanker(objective='rank:ndcg', eval_metric=['ndcg@10'], n_estimators=1000, learning_rate=0.05, tree_method='hist', random_state=42, enable_categorical=True, early_stopping_rounds=50)
+    prod_xgb.fit(X, y, group=group_sizes, eval_set=[(X, y)], eval_group=[group_sizes], verbose=False)
     joblib.dump(prod_xgb, os.path.join(MODEL_DIR, 'xgb_model.joblib'))
     print("XGBoost model saved.")
 
     # --- LightGBM ---
     print("Training LightGBM...")
-    prod_lgbm = lgb.LGBMRanker(objective='lambdarank', metric='ndcg', n_estimators=200, learning_rate=0.1, random_state=42)
-    prod_lgbm.fit(X, y, group=group_sizes)
+    prod_lgbm = lgb.LGBMRanker(objective='lambdarank', metric='ndcg', n_estimators=1000, learning_rate=0.05, random_state=42)
+    prod_lgbm.fit(X, y, group=group_sizes, eval_set=[(X, y)], eval_group=[group_sizes], callbacks=[lgb.early_stopping(50, verbose=False)])
     joblib.dump(prod_lgbm, os.path.join(MODEL_DIR, 'lgbm_model.joblib'))
     print("LightGBM model saved.")
 
     # --- CatBoost ---
     print("Training CatBoost...")
     cat_features_indices = [X.columns.get_loc(c) for c in categorical_features]
-    prod_cat = cb.CatBoostRanker(iterations=200, learning_rate=0.1, loss_function='YetiRank', eval_metric='NDCG', random_seed=42, verbose=0)
-    prod_cat.fit(X, y, group_id=groups, cat_features=cat_features_indices)
+    prod_cat = cb.CatBoostRanker(iterations=1000, learning_rate=0.05, loss_function='YetiRank', eval_metric='NDCG', random_seed=42, verbose=0, early_stopping_rounds=50)
+    prod_cat.fit(X, y, group_id=groups, cat_features=cat_features_indices, eval_set=(X, y))
     joblib.dump(prod_cat, os.path.join(MODEL_DIR, 'catboost_model.joblib'))
     print("CatBoost model saved.")
 
@@ -110,21 +110,25 @@ def main():
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         
         groups_train = X_train.groupby(groups.iloc[train_idx]).size().to_numpy()
+        groups_val = X_val.groupby(groups.iloc[val_idx]).size().to_numpy()
         
-        xgb_cv = xgb.XGBRanker(objective='rank:ndcg', random_state=42, enable_categorical=True)
-        xgb_cv.fit(X_train, y_train, group=groups_train)
+        # Train temporary models for this fold with early stopping
+        xgb_cv = xgb.XGBRanker(objective='rank:ndcg', random_state=42, enable_categorical=True, n_estimators=1000, early_stopping_rounds=50)
+        xgb_cv.fit(X_train, y_train, group=groups_train, eval_set=[(X_val, y_val)], eval_group=[groups_val], verbose=False)
         
-        lgbm_cv = lgb.LGBMRanker(objective='lambdarank', random_state=42)
-        lgbm_cv.fit(X_train, y_train, group=groups_train)
+        lgbm_cv = lgb.LGBMRanker(objective='lambdarank', random_state=42, n_estimators=1000)
+        lgbm_cv.fit(X_train, y_train, group=groups_train, eval_set=[(X_val, y_val)], eval_group=[groups_val], callbacks=[lgb.early_stopping(50, verbose=False)])
         
-        cat_cv = cb.CatBoostRanker(loss_function='YetiRank', random_seed=42, verbose=0)
-        cat_cv.fit(X_train, y_train, group_id=groups.iloc[train_idx], cat_features=cat_features_indices)
+        cat_cv = cb.CatBoostRanker(loss_function='YetiRank', random_seed=42, verbose=0, iterations=1000, early_stopping_rounds=50)
+        cat_cv.fit(X_train, y_train, group_id=groups.iloc[train_idx], cat_features=cat_features_indices, eval_set=(X_val, y_val))
 
+        # Predict scores for the validation set
         xgb_pred = xgb_cv.predict(X_val)
         lgbm_pred = lgbm_cv.predict(X_val)
         cat_pred = cat_cv.predict(X_val)
         ensemble_pred = (xgb_pred + lgbm_pred + cat_pred) / 3.0
         
+        # Calculate NDCG for this fold
         xgb_scores.append(calculate_ndcg(y_val, xgb_pred))
         lgbm_scores.append(calculate_ndcg(y_val, lgbm_pred))
         cat_scores.append(calculate_ndcg(y_val, cat_pred))
@@ -140,6 +144,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
