@@ -95,7 +95,6 @@ def main():
     # --- CatBoost ---
     print("Training CatBoost...")
     cat_features_indices = [X.columns.get_loc(c) for c in categorical_features]
-    # --- FIX: Create a CatBoost Pool for the evaluation set ---
     eval_pool = cb.Pool(data=X, label=y, group_id=groups, cat_features=cat_features_indices)
     prod_cat = cb.CatBoostRanker(iterations=1000, learning_rate=0.05, loss_function='YetiRank', eval_metric='NDCG', random_seed=42, verbose=0, early_stopping_rounds=50)
     prod_cat.fit(X, y, group_id=groups, cat_features=cat_features_indices, eval_set=eval_pool)
@@ -112,19 +111,17 @@ def main():
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         
         groups_train = X_train.groupby(groups.iloc[train_idx]).size().to_numpy()
-        groups_val = X_val.groupby(groups.iloc[val_idx]).size().to_numpy()
         
-        # Train temporary models for this fold with early stopping
-        xgb_cv = xgb.XGBRanker(objective='rank:ndcg', random_state=42, enable_categorical=True, n_estimators=1000, early_stopping_rounds=50)
-        xgb_cv.fit(X_train, y_train, group=groups_train, eval_set=[(X_val, y_val)], eval_group=[groups_val], verbose=False)
+        # --- FIX: Train CV models for a fixed number of iterations without early stopping ---
+        # This prevents them from stopping prematurely in the GitHub environment.
+        xgb_cv = xgb.XGBRanker(objective='rank:ndcg', random_state=42, enable_categorical=True, n_estimators=200)
+        xgb_cv.fit(X_train, y_train, group=groups_train)
         
-        lgbm_cv = lgb.LGBMRanker(objective='lambdarank', random_state=42, n_estimators=1000)
-        lgbm_cv.fit(X_train, y_train, group=groups_train, eval_set=[(X_val, y_val)], eval_group=[groups_val], callbacks=[lgb.early_stopping(50, verbose=False)])
+        lgbm_cv = lgb.LGBMRanker(objective='lambdarank', random_state=42, n_estimators=200)
+        lgbm_cv.fit(X_train, y_train, group=groups_train)
         
-        # --- FIX: Create a CatBoost Pool for the validation set in the CV loop ---
-        val_pool_cv = cb.Pool(data=X_val, label=y_val, group_id=groups.iloc[val_idx], cat_features=cat_features_indices)
-        cat_cv = cb.CatBoostRanker(loss_function='YetiRank', random_seed=42, verbose=0, iterations=1000, early_stopping_rounds=50)
-        cat_cv.fit(X_train, y_train, group_id=groups.iloc[train_idx], cat_features=cat_features_indices, eval_set=val_pool_cv)
+        cat_cv = cb.CatBoostRanker(loss_function='YetiRank', random_seed=42, verbose=0, iterations=200)
+        cat_cv.fit(X_train, y_train, group_id=groups.iloc[train_idx], cat_features=cat_features_indices)
 
         # Predict scores for the validation set
         xgb_pred = xgb_cv.predict(X_val)
