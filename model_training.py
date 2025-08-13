@@ -95,8 +95,9 @@ def main():
     # --- CatBoost ---
     print("Training CatBoost...")
     cat_features_indices = [X.columns.get_loc(c) for c in categorical_features]
+    # --- FIX: Added 'groups' to the eval_set tuple ---
     prod_cat = cb.CatBoostRanker(iterations=1000, learning_rate=0.05, loss_function='YetiRank', eval_metric='NDCG', random_seed=42, verbose=0, early_stopping_rounds=50)
-    prod_cat.fit(X, y, group_id=groups, cat_features=cat_features_indices, eval_set=(X, y))
+    prod_cat.fit(X, y, group_id=groups, cat_features=cat_features_indices, eval_set=(X, y, groups))
     joblib.dump(prod_cat, os.path.join(MODEL_DIR, 'catboost_model.joblib'))
     print("CatBoost model saved.")
 
@@ -119,8 +120,9 @@ def main():
         lgbm_cv = lgb.LGBMRanker(objective='lambdarank', random_state=42, n_estimators=1000)
         lgbm_cv.fit(X_train, y_train, group=groups_train, eval_set=[(X_val, y_val)], eval_group=[groups_val], callbacks=[lgb.early_stopping(50, verbose=False)])
         
+        # --- FIX: Added group_id for the validation set to the eval_set tuple ---
         cat_cv = cb.CatBoostRanker(loss_function='YetiRank', random_seed=42, verbose=0, iterations=1000, early_stopping_rounds=50)
-        cat_cv.fit(X_train, y_train, group_id=groups.iloc[train_idx], cat_features=cat_features_indices, eval_set=(X_val, y_val))
+        cat_cv.fit(X_train, y_train, group_id=groups.iloc[train_idx], cat_features=cat_features_indices, eval_set=(X_val, y_val, groups.iloc[val_idx]))
 
         # Predict scores for the validation set
         xgb_pred = xgb_cv.predict(X_val)
@@ -144,6 +146,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
