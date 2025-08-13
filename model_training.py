@@ -78,7 +78,8 @@ def main():
     
     # --- XGBoost ---
     print("Training XGBoost...")
-    prod_xgb = xgb.XGBRanker(objective='rank:ndcg', eval_metric=['ndcg@10'], n_estimators=200, learning_rate=0.1, tree_method='hist', random_state=42)
+    # --- FIX: Added enable_categorical=True ---
+    prod_xgb = xgb.XGBRanker(objective='rank:ndcg', eval_metric=['ndcg@10'], n_estimators=200, learning_rate=0.1, tree_method='hist', random_state=42, enable_categorical=True)
     prod_xgb.fit(X, y, group=group_sizes, verbose=False)
     joblib.dump(prod_xgb, os.path.join(MODEL_DIR, 'xgb_model.joblib'))
     print("XGBoost model saved.")
@@ -111,7 +112,8 @@ def main():
         groups_train = X_train.groupby(groups.iloc[train_idx]).size().to_numpy()
         
         # Train temporary models for this fold
-        xgb_cv = xgb.XGBRanker(objective='rank:ndcg', random_state=42)
+        # --- FIX: Added enable_categorical=True ---
+        xgb_cv = xgb.XGBRanker(objective='rank:ndcg', random_state=42, enable_categorical=True)
         xgb_cv.fit(X_train, y_train, group=groups_train)
         
         lgbm_cv = lgb.LGBMRanker(objective='lambdarank', random_state=42)
