@@ -24,6 +24,9 @@ jobs:
           python-version: '3.11'
 
       # --- NEW: Cache the FastF1 data directory ---
+      - name: Create FastF1 Cache Directory
+        run: mkdir -p ~/.cache/fastf1
+
       - name: Cache FastF1 data
         uses: actions/cache@v3
         with:
