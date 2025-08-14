@@ -1,6 +1,3 @@
-#JAI SHREE RAM //
-#JAI MATA DI //
-#JAI HANUMAN JI //
 import os
 import joblib
 import pandas as pd
