@@ -216,12 +216,12 @@ streamlit run app.py
 
 Your web browser should automatically open with the F1 Race Predictor interface.
 
-License This project is open-source and available under the MIT License.
-
 Have a look 👀
 
 📄 Full Detailed Project Document: https://docs.google.com/document/d/14w67atQS5IbDBdrSC80oS50eq0GWTu_8SsKxsEa9_-0/edit?tab=t.0
 
 🌐 Live App: https://formula1-predictor.streamlit.app
+
+License This project is open-source and available under the MIT License.
 
 Created by: Akshat Vadera
