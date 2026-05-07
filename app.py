@@ -74,13 +74,33 @@ numerical_features = [
 categorical_features = ['Driver', 'Team', 'StartingTyreCompound', 'TrackType']
 
 # --- Helper Functions ---
+# @st.cache_data
+# def get_next_race_info():
+#     try:
+#         schedule = fastf1.get_event_schedule(datetime.now().year, include_testing=False)
+#         schedule['EventDate'] = pd.to_datetime(schedule['EventDate']).dt.tz_localize(pytz.utc)
+#         now_utc = pd.Timestamp.now(tz='UTC')
+#         upcoming_races = schedule[schedule['EventDate'] > now_utc].sort_values(by='EventDate')
+#         if not upcoming_races.empty:
+#             return upcoming_races.iloc[0]
+#     except Exception as e:
+#         st.error(f"Could not fetch next race info: {e}")
+#     return None
+
 @st.cache_data
 def get_next_race_info():
     try:
+        # 1. Fetch schedule
         schedule = fastf1.get_event_schedule(datetime.now().year, include_testing=False)
-        schedule['EventDate'] = pd.to_datetime(schedule['EventDate']).dt.tz_localize(pytz.utc)
-        now_utc = pd.Timestamp.now(tz='UTC')
-        upcoming_races = schedule[schedule['EventDate'] > now_utc].sort_values(by='EventDate')
+        
+        # 2. Ensure EventDate is datetime and strip timezone info (make it naive)
+        schedule['EventDate'] = pd.to_datetime(schedule['EventDate']).dt.tz_localize(None)
+        
+        # 3. Compare against a naive "now"
+        now_naive = datetime.now()
+        
+        upcoming_races = schedule[schedule['EventDate'] > now_naive].sort_values(by='EventDate')
+        
         if not upcoming_races.empty:
             return upcoming_races.iloc[0]
     except Exception as e:
