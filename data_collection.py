@@ -122,6 +122,93 @@ def get_practice_features(year, round_num, race_drivers_list):
         })
     return pd.DataFrame(practice_features)
 
+# def process_new_races(existing_races_set):
+#     newly_processed_data = []
+#     current_year = datetime.now().year
+#     years_to_collect = list(range(START_YEAR, current_year + 1))
+    
+#     for year in years_to_collect:
+#         print(f"\n--- Checking {year} season for new data ---")
+#         try:
+#             schedule = fastf1.get_event_schedule(year)
+#         except ValueError:
+#             print(f"Could not load schedule for {year}. Skipping.")
+#             continue
+        
+#         schedule['EventDate'] = schedule['EventDate'].dt.tz_localize(pytz.utc) if schedule['EventDate'].dt.tz is None else schedule['EventDate'].dt.tz_convert(pytz.utc)
+#         schedule_to_process = schedule[schedule['EventDate'] < pd.Timestamp.now(tz='UTC')]
+
+#         for _, event in schedule_to_process.iterrows():
+#             event_name, round_num = event['EventName'], event['RoundNumber']
+#             race_identifier = (year, round_num)
+
+#             if "testing" in event_name.lower() or round_num == 0: continue
+#             if race_identifier in existing_races_set:
+#                 # print(f"SKIPPING: {year} {event_name}, data already exists.") # Uncomment for verbose skipping
+#                 continue
+            
+#             print(f"PROCESSING: {year} {event_name}...")
+#             # --- Start of single race processing ---
+#             quali_session = load_session_data(year, round_num, 'Q')
+#             if quali_session is None: continue
+            
+#             quali_features_df = get_driver_features(quali_session)
+#             if quali_features_df.empty: continue
+
+#             race_drivers_list = quali_features_df['Driver'].unique().tolist()
+#             practice_features_df = get_practice_features(year, round_num, race_drivers_list)
+            
+#             if not quali_session.results.empty:
+#                 quali_results = quali_session.results[['Abbreviation', 'Position']].rename(columns={'Abbreviation': 'Driver', 'Position': 'QualiPosition'})
+#                 quali_features_df = pd.merge(quali_features_df, quali_results, on='Driver', how='left')
+            
+#             race_session = load_session_data(year, round_num, 'R')
+#             if race_session is None or race_session.results.empty: continue
+            
+#             race_results = race_session.results[['Abbreviation', 'Position', 'TeamName', 'Status']].rename(columns={'Abbreviation': 'Driver', 'Position': 'RaceFinishPosition', 'TeamName': 'Team'})
+#             race_results['IsDNF'] = race_results['Status'].apply(lambda x: 0 if 'Lap' in x or 'Finished' in x else 1)
+            
+#             teammate_battles = []
+#             for team in race_results['Team'].unique():
+#                 team_drivers = race_results[race_results['Team'] == team]
+#                 if len(team_drivers) == 2:
+#                     d1, d2 = team_drivers.iloc[0], team_drivers.iloc[1]
+#                     winner, loser = (d1, d2) if d1['RaceFinishPosition'] < d2['RaceFinishPosition'] else (d2, d1)
+#                     teammate_battles.append({'Driver': winner['Driver'], 'BeatTeammate': 1})
+#                     teammate_battles.append({'Driver': loser['Driver'], 'BeatTeammate': 0})
+#             if teammate_battles: race_results = pd.merge(race_results, pd.DataFrame(teammate_battles), on='Driver', how='left')
+
+#             merged_df = pd.merge(quali_features_df, race_results, on=['Driver', 'Team'], how='inner')
+#             if not practice_features_df.empty: merged_df = pd.merge(merged_df, practice_features_df, on='Driver', how='left')
+            
+#             merged_df['NumPitStops'], merged_df['AvgStintLength'], merged_df['MedianLapTime'], merged_df['StdDevLapTime'], merged_df['AvgSector2Pace'], merged_df['StartingTyreCompound'] = [np.nan, np.nan, np.nan, np.nan, np.nan, 'UNKNOWN']
+
+#             try:
+#                 if not race_session.laps.empty:
+#                     for driver_code in merged_df['Driver']:
+#                         laps = race_session.laps.pick_drivers([driver_code])
+#                         if not laps.empty:
+#                             accurate_laps = laps.loc[laps['IsAccurate']]
+#                             num_pits = len(laps.loc[laps['PitInTime'].notna()])
+#                             laps_completed = merged_df.loc[merged_df['Driver'] == driver_code, 'LapsCompleted'].iloc[0]
+#                             merged_df.loc[merged_df['Driver'] == driver_code, 'NumPitStops'] = num_pits
+#                             merged_df.loc[merged_df['Driver'] == driver_code, 'AvgStintLength'] = laps_completed / (num_pits + 1) if laps_completed > 0 else 0
+#                             merged_df.loc[merged_df['Driver'] == driver_code, 'StartingTyreCompound'] = laps.pick_track_status('1')['Compound'].iloc[0] if not laps.pick_track_status('1').empty else 'UNKNOWN'
+#                             if not accurate_laps.empty:
+#                                 merged_df.loc[merged_df['Driver'] == driver_code, 'MedianLapTime'] = accurate_laps['LapTime'].dt.total_seconds().median()
+#                                 merged_df.loc[merged_df['Driver'] == driver_code, 'StdDevLapTime'] = accurate_laps['LapTime'].dt.total_seconds().std()
+#                                 merged_df.loc[merged_df['Driver'] == driver_code, 'AvgSector2Pace'] = accurate_laps['Sector2Time'].dt.total_seconds().mean()
+#             except DataNotLoadedError:
+#                  print(f"Race session for {year} {event_name} has no lap data. Skipping strategy features.")
+
+#             merged_df['Year'], merged_df['GrandPrix'], merged_df['EventDate'], merged_df['RoundNumber'] = year, event_name, event['EventDate'], round_num
+#             merged_df['TrackType'] = TRACK_TYPES.get(event_name, 'Unknown')
+#             track_info = TRACK_CHARACTERISTICS.get(event_name, {})
+#             merged_df['TrackLengthKm'], merged_df['NumCorners'] = track_info.get('LengthKm', np.nan), track_info.get('NumCorners', np.nan)
+#             newly_processed_data.append(merged_df)
+#             # --- End of single race processing ---
+#     return newly_processed_data
+
 def process_new_races(existing_races_set):
     newly_processed_data = []
     current_year = datetime.now().year
@@ -135,8 +222,15 @@ def process_new_races(existing_races_set):
             print(f"Could not load schedule for {year}. Skipping.")
             continue
         
-        schedule['EventDate'] = schedule['EventDate'].dt.tz_localize(pytz.utc) if schedule['EventDate'].dt.tz is None else schedule['EventDate'].dt.tz_convert(pytz.utc)
-        schedule_to_process = schedule[schedule['EventDate'] < pd.Timestamp.now(tz='UTC')]
+        # --- FIX: Handle Timezones correctly by stripping them (making them naive) ---
+        # 1. Convert EventDate to datetime objects
+        schedule['EventDate'] = pd.to_datetime(schedule['EventDate'])
+        
+        # 2. Strip timezone info to prevent comparison/conversion errors
+        schedule['EventDate'] = schedule['EventDate'].dt.tz_localize(None)
+        
+        # 3. Compare against a naive current timestamp
+        schedule_to_process = schedule[schedule['EventDate'] < datetime.now()]
 
         for _, event in schedule_to_process.iterrows():
             event_name, round_num = event['EventName'], event['RoundNumber']
@@ -144,7 +238,7 @@ def process_new_races(existing_races_set):
 
             if "testing" in event_name.lower() or round_num == 0: continue
             if race_identifier in existing_races_set:
-                # print(f"SKIPPING: {year} {event_name}, data already exists.") # Uncomment for verbose skipping
+                # print(f"SKIPPING: {year} {event_name}, data already exists.") 
                 continue
             
             print(f"PROCESSING: {year} {event_name}...")
